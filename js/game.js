@@ -53,7 +53,6 @@ const CFG = {
   playerR:            6,
   playerGlowR:        22,
 
-  leftEdgeMargin:     -20,
   crashDuration:      5.0,       // full explosion show before game over screen
   crashTimeScale:     0.20,      // slow-mo factor for zoom/shake feel (particles run real-time)
   particleCount:      100,       // neon explosion shards
@@ -62,7 +61,7 @@ const CFG = {
   zoomTarget:         1.08,
 };
 
-const DANGER_ZONE_WIDTH = 100; // px — change here to resize zone, flash, and collision check
+const DANGER_ZONE_WIDTH = 150; // px — controls visual zone width, shake/pulse trigger, and death boundary (player dies at x=0, the left edge of this zone)
 
 // ── CANVAS ───────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
@@ -380,7 +379,7 @@ function physics(dt) {
   if (trail.length > CFG.trailMax) trail.shift();
 
   // Death conditions
-  if (toSX(player.x) < CFG.leftEdgeMargin)               { die(); return; }
+  if (toSX(player.x) < 0)                                 { die(); return; }
   if (player.y < -120 || player.y > canvas.height + 120)  { die(); return; }
 
   maintainAnchors();
