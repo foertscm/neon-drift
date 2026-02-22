@@ -155,6 +155,17 @@ introAudio.loop   = true;
 introAudio.volume = 0.5;
 let introPlaying  = false;
 
+const crackleAudio = new Audio('assets/audio/crackle.mp3');
+crackleAudio.volume = 0.45;  // ~65 % of death sound — audible but below music
+
+// Danger-zone crackle state
+let _dangerInZone   = false;  // was player in zone last frame
+let _dangerActive   = false;  // crackle sequence is currently running
+let _dangerExiting  = false;  // letting current play finish, then stopping
+let _dangerTimer    = 0;      // seconds the sequence has been active (max 3)
+let _dangerCooldown = 0;      // seconds remaining before restart is allowed
+let _dangerNextPlay = 0;      // performance.now() ms when next crackle should fire
+
 // ── MUTE SYSTEM ───────────────────────────────────────────────────────────────
 let isMuted = localStorage.getItem('ob_mute') === '1';
 const MUTE_BTN = { x: 0, y: 0, size: 0 }; // updated each render frame for click detection
@@ -167,6 +178,7 @@ function setMute(b) {
   musicAudio.volume    = b ? 0 : 0.5;
   gameOverAudio.volume = b ? 0 : 0.45;
   introAudio.volume    = b ? 0 : 0.5;
+  crackleAudio.volume  = b ? 0 : 0.45;
 }
 
 // Apply persisted mute preference immediately on load
@@ -335,6 +347,8 @@ function initRun() {
   crashZoom = 1; crashFade = 0;
   shakeX = shakeY = 0;
   trail = []; particles = []; floatingTexts = [];
+  _dangerActive = false; _dangerExiting = false;
+  _dangerTimer  = 0; _dangerCooldown = 0; _dangerInZone = false;
 
   const W = canvas.width, H = canvas.height;
   player = {
@@ -482,6 +496,9 @@ function physics(dt) {
   trail.push({ x: player.x, y: player.y });
   if (trail.length > CFG.trailMax) trail.shift();
 
+  // Danger zone crackle audio (SAFE → DANGER edge trigger)
+  updateDangerAudio(dt);
+
   // Death conditions
   if (toSX(player.x) < 0)                                 { die(); return; }
   if (player.y < -120 || player.y > canvas.height + 120)  { die(); return; }
@@ -588,6 +605,10 @@ function die() {
   if (STATE === 'crash') return;
   STATE = 'crash';
   musicFadeOut();
+  // Stop danger crackle immediately so it doesn't overlap the death sound
+  crackleAudio.pause();
+  crackleAudio.currentTime = 0;
+  _dangerActive = false; _dangerExiting = false;
   try { deathAudio.currentTime = 0; deathAudio.play(); } catch (_) { /* autoplay blocked */ }
 
   goScore     = score;
@@ -667,6 +688,55 @@ function updateCrash(dt) {
     particles = []; shakeX = shakeY = 0;
     gameOverMusicStart();
   }
+}
+
+// ── DANGER AUDIO ──────────────────────────────────────────────────────────────
+function updateDangerAudio(dt) {
+  if (_dangerCooldown > 0) _dangerCooldown = Math.max(0, _dangerCooldown - dt);
+
+  const inZone = toSX(player.x) < DANGER_ZONE_WIDTH;
+
+  if (_dangerActive) {
+    if (!inZone && !_dangerExiting) {
+      // Player just left the zone — let the current play finish, then stop
+      _dangerExiting = true;
+    }
+
+    if (_dangerExiting) {
+      // Crackle finishes naturally; when silent, clean up
+      if (crackleAudio.paused || crackleAudio.ended) {
+        _dangerActive   = false;
+        _dangerExiting  = false;
+        _dangerCooldown = 0.5;
+      }
+    } else {
+      _dangerTimer += dt;
+      if (_dangerTimer >= 3.0) {
+        // Max 3-second limit reached — hard stop
+        crackleAudio.pause();
+        crackleAudio.currentTime = 0;
+        _dangerActive   = false;
+        _dangerCooldown = 0.5;
+      } else {
+        // Fire next crackle when the previous one has ended and gap has elapsed
+        const nowMs = performance.now();
+        if (nowMs >= _dangerNextPlay && (crackleAudio.paused || crackleAudio.ended)) {
+          crackleAudio.currentTime = 0;
+          try { crackleAudio.play(); } catch (_) { /* autoplay blocked */ }
+          _dangerNextPlay = nowMs + 630;  // ~0.5 s play + 130 ms gap
+        }
+      }
+    }
+  } else if (inZone && !_dangerInZone && _dangerCooldown <= 0) {
+    // Transition SAFE → DANGER: start crackle sequence
+    _dangerActive   = true;
+    _dangerExiting  = false;
+    _dangerTimer    = 0;
+    _dangerNextPlay = 0;  // play immediately on next check
+    crackleAudio.volume = isMuted ? 0 : 0.45;
+  }
+
+  _dangerInZone = inZone;
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
