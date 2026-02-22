@@ -121,6 +121,20 @@ let detachFlashTimer; // brief white flash on detach
 let inGameHintTimer = 0;  // seconds since run start
 let inGameHintAlpha = 0;  // 1 = fully visible, fades to 0
 
+// ── ONBOARDING STATE ──────────────────────────────────────────────────────────
+let obActive;          // true while onboarding phase is running
+let obAttachCount;     // attach count during onboarding (completes at 3)
+let obTimer;           // elapsed seconds in onboarding (timeout at 10s)
+let obPulseAlpha;      // orbiter highlight pulse opacity (1→0 on completion)
+let youAlpha;          // "YOU" marker opacity
+let youTimer;          // seconds since run start for YOU marker display
+let youDismissed;      // true once first in-game input triggered the YOU fade
+let youInputReady;     // true once inputHeld has gone false after run start (ignores launch keypress)
+let attachHintAnchor;  // anchor currently showing the ATTACH hint
+let attachHintTimer;   // seconds current ATTACH hint has been visible
+let attachHintAlpha;   // ATTACH hint opacity
+let attachHintCount;   // unique anchors that have triggered the hint this run
+
 // Reusable audio — created once to avoid memory leaks and browser policy issues
 const swooshAudio = new Audio('assets/audio/swoosh.wav');
 swooshAudio.volume = 0.5;
@@ -306,6 +320,18 @@ function initRun() {
   explosionCoreTimer = 0;
   inGameHintTimer = 0;
   inGameHintAlpha = 1;
+  obActive       = true;
+  obAttachCount  = 0;
+  obTimer        = 0;
+  obPulseAlpha   = 1;
+  youAlpha       = 1;
+  youTimer       = 0;
+  youDismissed   = false;
+  youInputReady  = false;
+  attachHintAnchor = null;
+  attachHintTimer  = 0;
+  attachHintAlpha  = 0;
+  attachHintCount  = 0;
   crashZoom = 1; crashFade = 0;
   shakeX = shakeY = 0;
   trail = []; particles = []; floatingTexts = [];
@@ -396,6 +422,58 @@ function physics(dt) {
       : Math.max(0, 1 - (inGameHintTimer - HINT_SHOW) / HINT_FADE);
   }
 
+  // ── ONBOARDING ─────────────────────────────────────────────────────────────
+  // Component 1: "YOU" marker — display 2-3s, fade on first deliberate in-game input
+  // youInputReady gates the dismiss so the keypress that launched the run is ignored
+  if (!youInputReady && !inputHeld) youInputReady = true;
+  if (youAlpha > 0) {
+    youTimer += dt;
+    if (youInputReady && !youDismissed && inputHeld) youDismissed = true;
+    if (youDismissed || youTimer >= 2.5) youAlpha = Math.max(0, youAlpha - dt / 0.5);
+  }
+
+  // Onboarding phase completion (3 attaches OR 10 seconds)
+  if (obActive) {
+    obTimer += dt;
+    if (obAttachCount >= 3 || obTimer >= 10) obActive = false;
+  }
+  // obPulseAlpha intentionally kept at 1 — pulse runs for the entire game session
+
+  // Component 2: contextual ATTACH hint
+  if (!player.orbiting) {
+    // Tick current hint; remove when expired or anchor out of range
+    if (attachHintAnchor) {
+      attachHintTimer += dt;
+      const dx = player.x - attachHintAnchor.x, dy = player.y - attachHintAnchor.y;
+      const inRange = (dx * dx + dy * dy) <= attachHintAnchor.grabR * attachHintAnchor.grabR;
+      if (!inRange || attachHintTimer >= 1.5 || attachHintAnchor.used) {
+        attachHintAlpha = Math.max(0, attachHintAlpha - dt * 5);
+        if (attachHintAlpha <= 0) attachHintAnchor = null;
+      } else {
+        attachHintAlpha = Math.min(1, attachHintAlpha + dt * 6);
+      }
+    }
+    // Find a new anchor to hint if budget remains
+    if (!attachHintAnchor && obActive && attachHintCount < 3) {
+      for (const a of anchors) {
+        if (a.used || a.wasHinted) continue;
+        const dx = player.x - a.x, dy = player.y - a.y;
+        if (dx * dx + dy * dy <= a.grabR * a.grabR) {
+          attachHintAnchor = a;
+          a.wasHinted      = true;
+          attachHintTimer  = 0;
+          attachHintAlpha  = 0;
+          attachHintCount++;
+          break;
+        }
+      }
+    }
+  } else {
+    // Orbiting — fade hint away quickly
+    if (attachHintAlpha > 0) attachHintAlpha = Math.max(0, attachHintAlpha - dt * 8);
+    if (attachHintAlpha <= 0) attachHintAnchor = null;
+  }
+
   // Floating texts: drift upward and fade
   for (const ft of floatingTexts) { ft.wy -= 50 * dt; ft.life -= 1.7 * dt; }
   floatingTexts = floatingTexts.filter(ft => ft.life > 0);
@@ -470,6 +548,11 @@ function attach(a) {
 
   // Red anchor penalty: brief screen flash
   if (a.ti === 2) redFlashTimer = 0.35;
+
+  // Onboarding: count attachment; dismiss active ATTACH hint immediately
+  if (obActive) obAttachCount++;
+  attachHintAnchor = null;
+  attachHintAlpha  = 0;
 }
 
 function detach() {
@@ -615,8 +698,10 @@ function render() {
   }
 
   renderAnchors(W, H);
+  renderAttachHint();
   renderTrail();
   renderPlayer();
+  renderYouMarker();
   renderParticles();
   renderFloatingTexts();
   ctx.restore();
@@ -859,6 +944,87 @@ function renderBoot(W, H) {
     ctx.fillText(`Best: ${fmt(highScore)}`, W / 2, H * 0.91);
   }
   ctx.textBaseline = 'alphabetic';
+}
+
+// ── ONBOARDING: "YOU" MARKER ──────────────────────────────────────────────────
+function renderYouMarker() {
+  if (youAlpha <= 0) return;
+  const px  = toSX(player.x), py = player.y;
+  const now = performance.now() / 1000;
+  const bob = Math.sin(now * 3.5) * 3;        // gentle ±3px vertical bob
+  const textY    = py - 48 - bob;             // text sits above the player
+  const arrowTip = py - 14;                   // arrowhead just above the player glow
+  const arrowBase = textY + 4;
+
+  ctx.save();
+  ctx.globalAlpha = youAlpha;
+
+  // Vertical connector line
+  ctx.strokeStyle = 'rgba(0,210,255,0.75)';
+  ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 6;
+  ctx.lineWidth   = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(px, arrowBase);
+  ctx.lineTo(px, arrowTip + 6);
+  ctx.stroke();
+
+  // Downward arrowhead
+  ctx.fillStyle = '#00ddff';
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.moveTo(px,     arrowTip);
+  ctx.lineTo(px - 4, arrowTip + 7);
+  ctx.lineTo(px + 4, arrowTip + 7);
+  ctx.closePath();
+  ctx.fill();
+
+  // "YOU" label
+  const fs = Math.min(canvas.width * 0.017, 14);
+  ctx.font        = `bold ${fs}px monospace`;
+  ctx.textAlign   = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 14;
+  ctx.fillStyle   = '#ffffff';
+  ctx.fillText('YOU', px, textY);
+
+  ctx.shadowBlur   = 0;
+  ctx.textBaseline = 'alphabetic';
+  ctx.restore();
+}
+
+// ── ONBOARDING: CONTEXTUAL ATTACH HINT ────────────────────────────────────────
+function renderAttachHint() {
+  if (!attachHintAnchor || attachHintAlpha <= 0 || player.orbiting) return;
+  const ax    = toSX(attachHintAnchor.x);
+  const ay    = attachHintAnchor.y;
+  const hintY = ay - attachHintAnchor.r - 18;
+
+  ctx.save();
+  ctx.globalAlpha  = attachHintAlpha;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+
+  const fs   = Math.min(canvas.width * 0.015, 12);
+  const text = 'INTERACT TO ATTACH';
+  ctx.font   = `bold ${fs}px monospace`;
+  const tw   = ctx.measureText(text).width;
+  const padX = 7, padY = 4;
+
+  // Semi-transparent background pill
+  ctx.fillStyle = 'rgba(0,16,36,0.80)';
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(ax - tw / 2 - padX, hintY - fs / 2 - padY, tw + padX * 2, fs + padY * 2, 4);
+  else               ctx.rect      (ax - tw / 2 - padX, hintY - fs / 2 - padY, tw + padX * 2, fs + padY * 2);
+  ctx.fill();
+
+  // Cyan label
+  ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 8;
+  ctx.fillStyle   = '#66ddff';
+  ctx.fillText(text, ax, hintY);
+
+  ctx.shadowBlur   = 0;
+  ctx.textBaseline = 'alphabetic';
+  ctx.restore();
 }
 
 // ── IN-GAME HINT OVERLAY ──────────────────────────────────────────────────────
@@ -1203,6 +1369,22 @@ function renderTrail() {
 function renderPlayer() {
   if (STATE === 'crash') return; // orbiter has shattered — explosion takes over
   const px = toSX(player.x), py = player.y;
+
+  // Onboarding highlight pulse — soft expanding ring, active during onboarding phase
+  if (obPulseAlpha > 0) {
+    const now = performance.now() / 1000;
+    const pt  = (now % 1.2) / 1.2;                     // 0→1 per 1.2s period
+    const pR  = CFG.playerGlowR * (1.2 + pt * 3.2);    // expands outward
+    const pA  = (1 - pt) * 0.55 * obPulseAlpha;        // fades as it expands
+    if (pA > 0.005) {
+      const pg = ctx.createRadialGradient(px, py, 0, px, py, pR);
+      pg.addColorStop(0,   `rgba(0,220,255,0)`);
+      pg.addColorStop(0.5, `rgba(0,220,255,${pA * 0.5})`);
+      pg.addColorStop(1,   `rgba(0,180,255,0)`);
+      ctx.fillStyle = pg;
+      ctx.beginPath(); ctx.arc(px, py, pR, 0, Math.PI * 2); ctx.fill();
+    }
+  }
 
   // Combo burst ring — expands outward on combo gain
   if (playerBurstTimer > 0) {
