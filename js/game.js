@@ -67,6 +67,19 @@ const DANGER_ZONE_WIDTH = 150; // px — controls visual zone width, shake/pulse
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 
+// ── NUMBER FORMATTING ─────────────────────────────────────────────────────────
+// Single reusable formatter — no garbage objects created per frame
+const FMT = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
+function fmt(n) { return FMT.format(Math.floor(n)); }
+// Cached live-score string — score changes every frame so we cache to avoid
+// repeated Intl formatting on identical integer values within the same frame
+let _fmtScoreLast = -1, _fmtScoreStr = '0';
+function fmtScore(n) {
+  const i = Math.floor(n);
+  if (i !== _fmtScoreLast) { _fmtScoreLast = i; _fmtScoreStr = FMT.format(i); }
+  return _fmtScoreStr;
+}
+
 function resize() {
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -442,7 +455,7 @@ function attach(a) {
   // Floating attach value (anchored to the anchor, drifts up)
   floatingTexts.push({
     wx: a.x, wy: a.y - a.r - 14,
-    text: a.ti === 2 ? `-1,000` : `+${scaledBonus.toLocaleString()}`,
+    text: a.ti === 2 ? fmt(a.attachBonus) : `+${fmt(scaledBonus)}`,
     color: a.hex, life: 1.0,
   });
 
@@ -649,6 +662,7 @@ function render() {
   renderHUD(W, H);
   renderOffScreenIndicator(W, H);
   if (inGameHintAlpha > 0) renderInGameHint(W, H);
+  renderLegend(W, H);
   renderMuteButton(W, H);
 }
 
@@ -842,7 +856,7 @@ function renderBoot(W, H) {
   // Best score
   if (highScore > 0) {
     ctx.fillStyle = '#1a3040'; ctx.font = `${ss}px monospace`;
-    ctx.fillText(`Best: ${Math.floor(highScore)}`, W / 2, H * 0.91);
+    ctx.fillText(`Best: ${fmt(highScore)}`, W / 2, H * 0.91);
   }
   ctx.textBaseline = 'alphabetic';
 }
@@ -925,7 +939,7 @@ function renderGameOver(W, H) {
 
   ctx.shadowColor = '#44aaff'; ctx.shadowBlur = glowBlur;
   ctx.fillStyle   = '#ffffff'; ctx.font = `bold ${scoreFs}px monospace`;
-  ctx.fillText(Math.floor(goScore), W / 2, H * 0.42);
+  ctx.fillText(fmt(goScore), W / 2, H * 0.42);
   ctx.shadowBlur  = 0;
 
   // ── Stats row ────────────────────────────────────────────────────────────
@@ -933,7 +947,7 @@ function renderGameOver(W, H) {
   const lineH  = ss * 1.75;
   const startY = H * 0.64;
   const stats  = [
-    ['Best Score', `${Math.floor(highScore)}`],
+    ['Best Score', fmt(highScore)],
     ['Max Combo',  `×${goMaxCombo}`],
   ];
   stats.forEach(([label, val], i) => {
@@ -1283,7 +1297,7 @@ function renderHUD(W, H) {
   ctx.shadowBlur  = orbiting ? 14 : 6;
   ctx.fillStyle   = scoreCol;
   ctx.font        = `bold ${f}px monospace`;
-  ctx.fillText(Math.floor(score), 16, 14);
+  ctx.fillText(fmtScore(score), 16, 14);
   ctx.shadowBlur  = 0;
 
   // Color combo (top-right) — only shown when count ≥ 2
@@ -1304,10 +1318,9 @@ function renderHUD(W, H) {
   if (highScore > 0) {
     ctx.fillStyle = '#1a3040';
     ctx.font      = `${f * 0.6}px monospace`;
-    ctx.fillText(`Best ${Math.floor(highScore)}`, W - 16, f + 22);
+    ctx.fillText(`Best ${fmt(highScore)}`, W - 16, f + 22);
   }
 
-  renderLegend(W, H);
   ctx.textBaseline = 'alphabetic';
 }
 
@@ -1384,6 +1397,12 @@ function renderOffScreenIndicator(W, H) {
 
 // ── ANCHOR LEGEND (bottom-right) ──────────────────────────────────────────────
 function renderLegend(W, H) {
+  ctx.save();
+  // Explicit reset — legend colours must never inherit state from HUD or other draw calls
+  ctx.shadowBlur  = 0;
+  ctx.shadowColor = 'transparent';
+  ctx.globalAlpha = 1;
+
   const ITEMS = [
     { hex: '#39ff6a', rgb: '57,255,106', label: 'High Risk', mult: '×10' },
     { hex: '#00d4ff', rgb: '0,212,255',  label: 'Standard',  mult: '×3'  },
@@ -1435,6 +1454,7 @@ function renderLegend(W, H) {
     ctx.textAlign  = 'left';
   });
   ctx.textBaseline = 'alphabetic';
+  ctx.restore();
 }
 
 // ── MUTE BUTTON ───────────────────────────────────────────────────────────────
@@ -1450,6 +1470,7 @@ function renderMuteButton(W, H) {
   ctx.fillStyle   = isMuted ? 'rgba(70,0,0,0.70)' : 'rgba(0,15,42,0.60)';
   ctx.strokeStyle = isMuted ? 'rgba(255,60,60,0.55)' : 'rgba(0,160,255,0.35)';
   ctx.lineWidth   = 1;
+  ctx.beginPath();
   if (ctx.roundRect) ctx.roundRect(bx, by, size, size, 5);
   else               ctx.rect(bx, by, size, size);
   ctx.fill(); ctx.stroke();
