@@ -4,6 +4,8 @@
 
 A browser-based arcade game built with HTML5 Canvas. Navigate a glowing orbiter through a cyberpunk corridor by swinging around neon anchors and releasing at the right moment to drift forward.
 
+Play it here: https://neon-drift.martin-förtsch.de/
+
 ## How to Play
 
 **Hold** Space / click / tap to latch onto an anchor and orbit it.
