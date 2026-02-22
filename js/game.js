@@ -654,76 +654,173 @@ function render() {
 
 // ── BOOT SCREEN ───────────────────────────────────────────────────────────────
 function renderBootDemoAnimation(W, H, centerY) {
-  const LOOP = 2.5, ORBIT_END = 1.5;
-  const t = (performance.now() / 1000) % LOOP;
-  const anchorR = Math.min(W * 0.018, 13);
-  const orbitR  = anchorR * 3.0;
-  const playerR = Math.max(3, anchorR * 0.35);
+  const LOOP = 2.8, ORBIT_END = 1.7, FADE = 0.22;
+  const t   = (performance.now() / 1000) % LOOP;
+  const now =  performance.now() / 1000;
+
+  const anchorR = Math.min(W * 0.022, 16);
+  const orbitR  = anchorR * 3.4;
+  const playerR = Math.max(4, anchorR * 0.46);
   const cx = W / 2, cy = centerY;
 
-  // Dotted orbit ring (always visible as guide)
+  // Subtle orbiter pulse (does not affect text or anchor)
+  const pulse = 0.88 + 0.12 * Math.sin(now * Math.PI * 3.5);
+
+  // ── Orbit guide ring ────────────────────────────────────────────────────
   ctx.save();
-  ctx.strokeStyle = 'rgba(0,170,220,0.18)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 5]);
+  ctx.strokeStyle = 'rgba(0,200,255,0.30)';
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([3, 6]);
   ctx.beginPath(); ctx.arc(cx, cy, orbitR, 0, Math.PI * 2); ctx.stroke();
   ctx.setLineDash([]); ctx.restore();
 
-  // Anchor
+  // ── Anchor — brighter, larger glow than gameplay version ─────────────────
   ctx.save();
-  ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 16;
+  // Soft outer halo
+  const haloG = ctx.createRadialGradient(cx, cy, 0, cx, cy, anchorR * 2.2);
+  haloG.addColorStop(0, 'rgba(0,200,255,0.28)');
+  haloG.addColorStop(1, 'rgba(0,100,200,0)');
+  ctx.fillStyle = haloG;
+  ctx.beginPath(); ctx.arc(cx, cy, anchorR * 2.2, 0, Math.PI * 2); ctx.fill();
+  // Core gradient
+  ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 30;
   const ag = ctx.createRadialGradient(cx, cy, 0, cx, cy, anchorR);
-  ag.addColorStop(0, '#55ccff'); ag.addColorStop(1, '#0066bb');
+  ag.addColorStop(0,   '#bbf0ff');
+  ag.addColorStop(0.4, '#33bbff');
+  ag.addColorStop(1,   '#006ecc');
   ctx.fillStyle = ag;
   ctx.beginPath(); ctx.arc(cx, cy, anchorR, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#44bbff'; ctx.lineWidth = 1.2;
+  // Bright ring
+  ctx.shadowBlur = 10;
+  ctx.strokeStyle = '#88ddff'; ctx.lineWidth = 1.6;
   ctx.beginPath(); ctx.arc(cx, cy, anchorR, 0, Math.PI * 2); ctx.stroke();
+  // Tiny bright centre dot
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(cx, cy, anchorR * 0.22, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 
+  // ── Animation phases ────────────────────────────────────────────────────
   if (t < ORBIT_END) {
-    // Orbiting phase — clockwise from top
-    const angle = -Math.PI / 2 + (t / ORBIT_END) * Math.PI * 1.8;
+    // Orbiting phase — clockwise, 2.2π sweep for clear full-arc visibility
+    const angle = -Math.PI / 2 + (t / ORBIT_END) * Math.PI * 2.2;
     const px = cx + orbitR * Math.cos(angle);
     const py = cy + orbitR * Math.sin(angle);
+    const r  = playerR * pulse;
+
+    // Outer aura
     ctx.save();
-    ctx.shadowColor = '#88eeff'; ctx.shadowBlur = 10;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(px, py, playerR, 0, Math.PI * 2); ctx.fill();
+    const pg = ctx.createRadialGradient(px, py, 0, px, py, r * 2.6);
+    pg.addColorStop(0, 'rgba(120,255,255,0.50)');
+    pg.addColorStop(1, 'rgba(0,200,255,0)');
+    ctx.fillStyle = pg;
+    ctx.beginPath(); ctx.arc(px, py, r * 2.6, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
+
+    // Core dot + neon tint
+    ctx.save();
+    ctx.shadowColor = '#bbffff'; ctx.shadowBlur = 24;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(120,255,255,0.70)';
+    ctx.beginPath(); ctx.arc(px, py, r * 0.50, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
   } else {
-    // Drift phase — detached, moving right
-    const p = (t - ORBIT_END) / (LOOP - ORBIT_END);
-    const endAngle = -Math.PI / 2 + Math.PI * 1.8;
+    // Drift phase — tangential launch, exaggerated for instructional clarity
+    const p        = (t - ORBIT_END) / (LOOP - ORBIT_END);
+    const endAngle = -Math.PI / 2 + Math.PI * 2.2;
     const sx = cx + orbitR * Math.cos(endAngle);
     const sy = cy + orbitR * Math.sin(endAngle);
-    const driftX = sx + p * orbitR * 2.4;
-    const driftY = sy + p * orbitR * 0.4; // slight downward drift (gravity)
 
-    // Trail
-    for (let i = 3; i >= 1; i--) {
-      const tx = driftX - (p * orbitR * 2.4 / 3) * i * 0.28;
-      const ty = driftY - (p * orbitR * 0.4 / 3) * i * 0.28;
+    // Natural clockwise tangent at endAngle, blended with forward bias for clarity
+    const tanX = -Math.sin(endAngle);
+    const tanY =  Math.cos(endAngle);
+    const rawX = tanX * 0.55 + 0.75;  // bias toward rightward (forward)
+    const rawY = tanY * 0.55 + 0.25;  // slight downward (gravity feel)
+    const len  = Math.sqrt(rawX * rawX + rawY * rawY);
+    const ndx  = rawX / len, ndy = rawY / len;
+
+    const speed = orbitR * 4.0;
+    const eased = p * (2 - p); // ease-out (decelerates for readability)
+    const driftX = sx + ndx * speed * eased;
+    const driftY = sy + ndy * speed * eased;
+    const alpha  = Math.max(0, 1 - p * 0.80);
+
+    // Trail dots
+    for (let i = 4; i >= 1; i--) {
+      const tp  = Math.max(0, p - i * 0.05);
+      const te  = tp * (2 - tp);
+      const trX = sx + ndx * speed * te;
+      const trY = sy + ndy * speed * te;
       ctx.save();
-      ctx.globalAlpha = (1 - i / 4) * 0.5 * (1 - p * 0.5);
-      ctx.fillStyle = '#44ddff';
-      ctx.beginPath(); ctx.arc(tx, ty, playerR * 0.7, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = (1 - i / 5) * 0.70 * (1 - p * 0.5);
+      ctx.fillStyle = '#55eeff';
+      ctx.beginPath(); ctx.arc(trX, trY, playerR * 0.60, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
+
+    // Core dot
     ctx.save();
-    ctx.globalAlpha = Math.max(0, 1 - p * 0.6);
-    ctx.shadowColor = '#88eeff'; ctx.shadowBlur = 10;
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = '#bbffff'; ctx.shadowBlur = 24;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath(); ctx.arc(driftX, driftY, playerR, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(120,255,255,0.70)';
+    ctx.beginPath(); ctx.arc(driftX, driftY, playerR * 0.50, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
+
+  // ── Dynamic instructional text — crossfades with animation state ──────────
+  const hs    = Math.min(W * 0.032, 21);
+  const textY = cy + orbitR + hs * 2.4;
+
+  // Overlapping crossfade: simultaneous fade at both transition points
+  let orbitAlpha = 0, driftAlpha = 0;
+  if (t < FADE) {
+    orbitAlpha = t / FADE;
+  } else if (t < ORBIT_END - FADE) {
+    orbitAlpha = 1;
+  } else if (t < ORBIT_END) {
+    const f = (t - (ORBIT_END - FADE)) / FADE;
+    orbitAlpha = 1 - f; driftAlpha = f;   // simultaneous crossfade
+  } else if (t < LOOP - FADE) {
+    driftAlpha = 1;
+  } else {
+    const f = (t - (LOOP - FADE)) / FADE;
+    driftAlpha = 1 - f; orbitAlpha = f;   // crossfade back at loop boundary
+  }
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = `bold ${hs}px monospace`;
+
+  if (orbitAlpha > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = orbitAlpha;
+    ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 16;
+    ctx.fillStyle   = '#66ddff';
+    ctx.fillText('HOLD SPACE / TAP / CLICK', W / 2, textY);
+    ctx.restore();
+  }
+  if (driftAlpha > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = driftAlpha;
+    ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 16;
+    ctx.fillStyle   = '#66ddff';
+    ctx.fillText('RELEASE TO DRIFT', W / 2, textY);
+    ctx.restore();
+  }
+
+  ctx.textBaseline = 'alphabetic';
 }
 
 function renderBoot(W, H) {
   renderBackground(W, H);
 
   const ts = Math.min(W * 0.07, 56);
-  const hs = Math.min(W * 0.034, 22);  // hint font size
-  const ss = Math.min(W * 0.026, 17);  // small text size
+  const ss = Math.min(W * 0.026, 17);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 
   // Layered neon title — outer bloom, mid colour, bright core
@@ -739,25 +836,13 @@ function renderBoot(W, H) {
   ctx.fillText('NEON DRIFT', W / 2, H * 0.38);
   ctx.shadowBlur = 0;
 
-  // Controls hint line 1
-  ctx.font = `bold ${hs}px monospace`;
-  ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 16;
-  ctx.fillStyle = '#55ccff';
-  ctx.fillText('HOLD SPACE / TAP / CLICK TO ORBIT', W / 2, H * 0.54);
-
-  // Controls hint line 2
-  ctx.shadowBlur = 10;
-  ctx.fillStyle = '#2299bb';
-  ctx.fillText('RELEASE TO DRIFT', W / 2, H * 0.61);
-  ctx.shadowBlur = 0;
-
-  // Micro demo animation
-  renderBootDemoAnimation(W, H, H * 0.74);
+  // Demo animation — includes dynamic instructional text tied to animation state
+  renderBootDemoAnimation(W, H, H * 0.62);
 
   // Best score
   if (highScore > 0) {
     ctx.fillStyle = '#1a3040'; ctx.font = `${ss}px monospace`;
-    ctx.fillText(`Best: ${Math.floor(highScore)}`, W / 2, H * 0.89);
+    ctx.fillText(`Best: ${Math.floor(highScore)}`, W / 2, H * 0.91);
   }
   ctx.textBaseline = 'alphabetic';
 }
