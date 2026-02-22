@@ -752,165 +752,220 @@ function render() {
 }
 
 // ── BOOT SCREEN ───────────────────────────────────────────────────────────────
+
+// Draw the boot-demo orbiter at (px, py) with radius r and optional alpha
+function _drawBootOrbiter(px, py, r, alpha) {
+  if (alpha === undefined) alpha = 1;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const pg = ctx.createRadialGradient(px, py, 0, px, py, r * 2.6);
+  pg.addColorStop(0, 'rgba(120,255,255,0.50)');
+  pg.addColorStop(1, 'rgba(0,200,255,0)');
+  ctx.fillStyle = pg;
+  ctx.beginPath(); ctx.arc(px, py, r * 2.6, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowColor = '#bbffff'; ctx.shadowBlur = 24;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(120,255,255,0.70)';
+  ctx.beginPath(); ctx.arc(px, py, r * 0.50, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// Draw the [SPACE / CLICK] input hint capsule centred at (W/2, y)
+function _drawInputCapsule(W, y, alpha) {
+  if (alpha <= 0.01) return;
+  const hs    = Math.min(W * 0.021, 13);
+  const label = '[ SPACE / CLICK ]';
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `bold ${hs}px monospace`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const tw   = ctx.measureText(label).width;
+  const padX = hs * 0.9, padY = hs * 0.45;
+  const bw   = tw + padX * 2, bh = hs + padY * 2;
+  const bx   = W / 2 - bw / 2, by = y - bh / 2;
+  ctx.fillStyle   = 'rgba(0,20,40,0.80)';
+  ctx.strokeStyle = 'rgba(0,180,255,0.55)';
+  ctx.lineWidth   = 1.2;
+  ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 8;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, bh / 2);
+  else               ctx.rect(bx, by, bw, bh);
+  ctx.fill(); ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle  = '#88ddff';
+  ctx.fillText(label, W / 2, y);
+  ctx.restore();
+}
+
+// 3-phase boot demo: approach → orbit → release  (~7.5 s loop)
 function renderBootDemoAnimation(W, H, centerY) {
-  const LOOP = 2.8, ORBIT_END = 1.7, FADE = 0.22;
+  const LOOP   = 7.5;
+  const P1_END = 2.0;   // approach phase ends
+  const P2_END = 4.2;   // orbit phase ends
+  const P3_END = 6.0;   // drift exits frame; 6.0–7.5 is silent pause
+  const FADE   = 0.28;  // label fade-in / fade-out duration (seconds)
+
   const t   = (performance.now() / 1000) % LOOP;
   const now =  performance.now() / 1000;
 
   const anchorR = Math.min(W * 0.022, 16);
   const orbitR  = anchorR * 3.4;
+  const grabR   = orbitR * 1.28;   // attach-radius ring (slightly wider than orbit)
   const playerR = Math.max(4, anchorR * 0.46);
   const cx = W / 2, cy = centerY;
-
-  // Subtle orbiter pulse (does not affect text or anchor)
   const pulse = 0.88 + 0.12 * Math.sin(now * Math.PI * 3.5);
 
-  // ── Orbit guide ring ────────────────────────────────────────────────────
-  ctx.save();
-  ctx.strokeStyle = 'rgba(0,200,255,0.30)';
-  ctx.lineWidth = 1.2;
-  ctx.setLineDash([3, 6]);
-  ctx.beginPath(); ctx.arc(cx, cy, orbitR, 0, Math.PI * 2); ctx.stroke();
-  ctx.setLineDash([]); ctx.restore();
+  // ── ANCHOR — glows brighter while orbiting ───────────────────────────────
+  const glowBoost = t >= P1_END && t < P2_END
+    ? Math.min(1, (t - P1_END) / 0.4)
+    : t >= P2_END
+      ? Math.max(0, 1 - (t - P2_END) / 0.35)
+      : 0;
 
-  // ── Anchor — brighter, larger glow than gameplay version ─────────────────
   ctx.save();
-  // Soft outer halo
-  const haloG = ctx.createRadialGradient(cx, cy, 0, cx, cy, anchorR * 2.2);
-  haloG.addColorStop(0, 'rgba(0,200,255,0.28)');
+  const haloG = ctx.createRadialGradient(cx, cy, 0, cx, cy, anchorR * 2.4);
+  haloG.addColorStop(0, `rgba(0,200,255,${0.25 + glowBoost * 0.25})`);
   haloG.addColorStop(1, 'rgba(0,100,200,0)');
   ctx.fillStyle = haloG;
-  ctx.beginPath(); ctx.arc(cx, cy, anchorR * 2.2, 0, Math.PI * 2); ctx.fill();
-  // Core gradient
-  ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 30;
+  ctx.beginPath(); ctx.arc(cx, cy, anchorR * 2.4, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowColor = '#00ccff'; ctx.shadowBlur = 30 + glowBoost * 20;
   const ag = ctx.createRadialGradient(cx, cy, 0, cx, cy, anchorR);
   ag.addColorStop(0,   '#bbf0ff');
   ag.addColorStop(0.4, '#33bbff');
   ag.addColorStop(1,   '#006ecc');
   ctx.fillStyle = ag;
   ctx.beginPath(); ctx.arc(cx, cy, anchorR, 0, Math.PI * 2); ctx.fill();
-  // Bright ring
   ctx.shadowBlur = 10;
   ctx.strokeStyle = '#88ddff'; ctx.lineWidth = 1.6;
   ctx.beginPath(); ctx.arc(cx, cy, anchorR, 0, Math.PI * 2); ctx.stroke();
-  // Tiny bright centre dot
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#ffffff';
+  ctx.shadowBlur = 0; ctx.fillStyle = '#ffffff';
   ctx.beginPath(); ctx.arc(cx, cy, anchorR * 0.22, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 
-  // ── Animation phases ────────────────────────────────────────────────────
-  if (t < ORBIT_END) {
-    // Orbiting phase — clockwise, 2.2π sweep for clear full-arc visibility
-    const angle = -Math.PI / 2 + (t / ORBIT_END) * Math.PI * 2.2;
-    const px = cx + orbitR * Math.cos(angle);
-    const py = cy + orbitR * Math.sin(angle);
-    const r  = playerR * pulse;
+  // ── PHASE 1 — APPROACH ───────────────────────────────────────────────────
+  if (t < P1_END) {
+    const p     = t / P1_END;
+    const eased = p * (2 - p);            // ease-out: fast approach, slows near anchor
+    const startX = cx - orbitR * 4.8;
+    const endX   = cx - orbitR * 1.1;    // just outside orbit radius on the left
+    const px = startX + (endX - startX) * eased;
+    const py = cy;
 
-    // Outer aura
+    // Attach-radius ring fades in once orbiter is ~50 % of the way in
+    const ringP = Math.max(0, Math.min(1, (p - 0.50) / 0.28));
+    if (ringP > 0) {
+      ctx.save();
+      ctx.globalAlpha = ringP * 0.55;
+      ctx.strokeStyle = '#00eeff'; ctx.lineWidth = 1.4;
+      ctx.shadowColor = '#00eeff'; ctx.shadowBlur = 10;
+      ctx.setLineDash([5, 9]);
+      ctx.beginPath(); ctx.arc(cx, cy, grabR, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]); ctx.restore();
+    }
+
+    // Subtle anchor highlight once orbiter enters the grab zone
+    if (px >= cx - grabR) {
+      const ent = Math.min(1, (px - (cx - grabR)) / (grabR * 0.5));
+      ctx.save();
+      ctx.globalAlpha = ent * 0.35;
+      ctx.fillStyle   = 'rgba(0,180,255,0.5)';
+      ctx.shadowColor = '#00eeff'; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(cx, cy, anchorR * 1.7, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    _drawBootOrbiter(px, py, playerR * pulse);
+  }
+
+  // ── PHASE 2 — ORBIT ──────────────────────────────────────────────────────
+  if (t >= P1_END && t < P2_END) {
+    const p     = (t - P1_END) / (P2_END - P1_END);
+    const angle = -Math.PI / 2 + p * Math.PI * 2.2;   // top → clockwise, 2.2π sweep
+    const px    = cx + orbitR * Math.cos(angle);
+    const py    = cy + orbitR * Math.sin(angle);
+
+    // Dashed orbit guide ring
     ctx.save();
-    const pg = ctx.createRadialGradient(px, py, 0, px, py, r * 2.6);
-    pg.addColorStop(0, 'rgba(120,255,255,0.50)');
-    pg.addColorStop(1, 'rgba(0,200,255,0)');
-    ctx.fillStyle = pg;
-    ctx.beginPath(); ctx.arc(px, py, r * 2.6, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+    ctx.strokeStyle = 'rgba(0,200,255,0.28)';
+    ctx.lineWidth = 1.2; ctx.setLineDash([3, 7]);
+    ctx.beginPath(); ctx.arc(cx, cy, orbitR, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]); ctx.restore();
 
-    // Core dot + neon tint
-    ctx.save();
-    ctx.shadowColor = '#bbffff'; ctx.shadowBlur = 24;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(120,255,255,0.70)';
-    ctx.beginPath(); ctx.arc(px, py, r * 0.50, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+    _drawBootOrbiter(px, py, playerR * pulse);
 
-  } else {
-    // Drift phase — tangential launch, exaggerated for instructional clarity
-    const p        = (t - ORBIT_END) / (LOOP - ORBIT_END);
+    // Input capsule: fades in quickly, stays visible for the full orbit
+    const capsAlpha = Math.min(1, p / 0.18);
+    _drawInputCapsule(W, cy + orbitR + anchorR * 5.0, capsAlpha);
+  }
+
+  // ── PHASE 3 — DETACH & DRIFT ─────────────────────────────────────────────
+  if (t >= P2_END && t < P3_END) {
+    const p        = (t - P2_END) / (P3_END - P2_END);
     const endAngle = -Math.PI / 2 + Math.PI * 2.2;
-    const sx = cx + orbitR * Math.cos(endAngle);
-    const sy = cy + orbitR * Math.sin(endAngle);
+    const sx       = cx + orbitR * Math.cos(endAngle);
+    const sy       = cy + orbitR * Math.sin(endAngle);
 
-    // Natural clockwise tangent at endAngle, blended with forward bias for clarity
+    // Tangent at end of orbit, biased forward (rightward)
     const tanX = -Math.sin(endAngle);
     const tanY =  Math.cos(endAngle);
-    const rawX = tanX * 0.55 + 0.75;  // bias toward rightward (forward)
-    const rawY = tanY * 0.55 + 0.25;  // slight downward (gravity feel)
+    const rawX = tanX * 0.55 + 0.75;
+    const rawY = tanY * 0.55 + 0.25;
     const len  = Math.sqrt(rawX * rawX + rawY * rawY);
     const ndx  = rawX / len, ndy = rawY / len;
 
-    const speed = orbitR * 4.0;
-    const eased = p * (2 - p); // ease-out (decelerates for readability)
+    const speed  = orbitR * 5.0;
+    const eased  = p * (2 - p);
     const driftX = sx + ndx * speed * eased;
     const driftY = sy + ndy * speed * eased;
-    const alpha  = Math.max(0, 1 - p * 0.80);
+    const alpha  = Math.max(0, 1 - Math.max(0, p - 0.65) / 0.35);
 
-    // Trail dots
-    for (let i = 4; i >= 1; i--) {
-      const tp  = Math.max(0, p - i * 0.05);
+    // Motion streaks behind the orbiter
+    for (let i = 5; i >= 1; i--) {
+      const tp  = Math.max(0, p - i * 0.04);
       const te  = tp * (2 - tp);
       const trX = sx + ndx * speed * te;
       const trY = sy + ndy * speed * te;
       ctx.save();
-      ctx.globalAlpha = (1 - i / 5) * 0.70 * (1 - p * 0.5);
+      ctx.globalAlpha = (1 - i / 6) * 0.60 * (1 - p * 0.55);
       ctx.fillStyle = '#55eeff';
-      ctx.beginPath(); ctx.arc(trX, trY, playerR * 0.60, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(trX, trY, playerR * 0.55, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
 
-    // Core dot
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.shadowColor = '#bbffff'; ctx.shadowBlur = 24;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(driftX, driftY, playerR, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(120,255,255,0.70)';
-    ctx.beginPath(); ctx.arc(driftX, driftY, playerR * 0.50, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+    _drawBootOrbiter(driftX, driftY, playerR, alpha);
+
+    // Input capsule dims immediately on release
+    const capsAlpha = Math.max(0, 1 - p / 0.28);
+    _drawInputCapsule(W, cy + orbitR + anchorR * 5.0, capsAlpha);
   }
 
-  // ── Dynamic instructional text — crossfades with animation state ──────────
-  const hs    = Math.min(W * 0.032, 21);
-  const textY = cy + orbitR + hs * 2.4;
+  // ── PHASE TEXT LABELS ─────────────────────────────────────────────────────
+  const hs    = Math.min(W * 0.026, 17);
+  const textY = cy + orbitR + hs * 1.8;
 
-  // Overlapping crossfade: simultaneous fade at both transition points
-  let orbitAlpha = 0, driftAlpha = 0;
-  if (t < FADE) {
-    orbitAlpha = t / FADE;
-  } else if (t < ORBIT_END - FADE) {
-    orbitAlpha = 1;
-  } else if (t < ORBIT_END) {
-    const f = (t - (ORBIT_END - FADE)) / FADE;
-    orbitAlpha = 1 - f; driftAlpha = f;   // simultaneous crossfade
-  } else if (t < LOOP - FADE) {
-    driftAlpha = 1;
-  } else {
-    const f = (t - (LOOP - FADE)) / FADE;
-    driftAlpha = 1 - f; orbitAlpha = f;   // crossfade back at loop boundary
-  }
-
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = `bold ${hs}px monospace`;
-
-  if (orbitAlpha > 0.01) {
+  function drawPhaseLabel(label, localT, duration) {
+    let a;
+    if      (localT < FADE)            a = localT / FADE;
+    else if (localT < duration - FADE) a = 1;
+    else                               a = (duration - localT) / FADE;
+    a = Math.max(0, Math.min(1, a));
+    if (a < 0.01) return;
     ctx.save();
-    ctx.globalAlpha = orbitAlpha;
-    ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 16;
+    ctx.globalAlpha = a;
+    ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 14;
     ctx.fillStyle   = '#66ddff';
-    ctx.fillText('HOLD SPACE / TAP / CLICK', W / 2, textY);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `${hs}px monospace`;
+    ctx.fillText(label, W / 2, textY);
     ctx.restore();
   }
-  if (driftAlpha > 0.01) {
-    ctx.save();
-    ctx.globalAlpha = driftAlpha;
-    ctx.shadowColor = '#00aaff'; ctx.shadowBlur = 16;
-    ctx.fillStyle   = '#66ddff';
-    ctx.fillText('RELEASE TO DRIFT', W / 2, textY);
-    ctx.restore();
-  }
+
+  if      (t < P1_END) drawPhaseLabel('Approach an anchor', t,          P1_END);
+  else if (t < P2_END) drawPhaseLabel('Hold to orbit',       t - P1_END, P2_END - P1_END);
+  else if (t < P3_END) drawPhaseLabel('Release to launch',   t - P2_END, P3_END - P2_END);
+  // t ∈ [P3_END, LOOP): silent pause before next loop — no label
 
   ctx.textBaseline = 'alphabetic';
 }
