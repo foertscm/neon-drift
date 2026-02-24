@@ -166,6 +166,10 @@ let _dangerTimer    = 0;      // seconds the sequence has been active (max 3)
 let _dangerCooldown = 0;      // seconds remaining before restart is allowed
 let _dangerNextPlay = 0;      // performance.now() ms when next crackle should fire
 
+// Speed display state
+let _speedKmh         = 120; // displayed km/h value — never decreases during a run
+let _speedUpdateTimer = 0;   // throttle value updates to ~12/s
+
 // ── MUTE SYSTEM ───────────────────────────────────────────────────────────────
 let isMuted = localStorage.getItem('ob_mute') === '1';
 const MUTE_BTN = { x: 0, y: 0, size: 0 }; // updated each render frame for click detection
@@ -318,7 +322,9 @@ function maintainAnchors() {
 // ── PHYSICS ──────────────────────────────────────────────────────────────────
 function initRun() {
   rng             = mkRng(Date.now() ^ (Math.random() * 0xFFFFFFFF | 0));
-  scrollSpeed     = CFG.scrollSpeedInit;
+  scrollSpeed       = CFG.scrollSpeedInit;
+  _speedKmh         = 120;
+  _speedUpdateTimer = 0;
   runTime         = score = crashTimer = 0;
   lastColorName   = null;
   colorComboCount = 0;
@@ -421,6 +427,14 @@ function physics(dt) {
   // World scroll (independent of player movement)
   cameraX    += scrollSpeed * dt;
   scrollSpeed = Math.min(CFG.scrollSpeedMax, scrollSpeed + CFG.scrollAccel * dt);
+
+  // Speed display — throttled value update (~12/s), never decreases
+  _speedUpdateTimer -= dt;
+  if (_speedUpdateTimer <= 0) {
+    _speedUpdateTimer = 1 / 12;
+    const target = Math.round(1.477 * scrollSpeed - 108.9);
+    if (target > _speedKmh) _speedKmh = target;
+  }
 
   if (comboPulseTimer   > 0) comboPulseTimer   -= dt;
   if (playerBurstTimer  > 0) playerBurstTimer  -= dt;
@@ -815,6 +829,7 @@ function render() {
   }
 
   renderHUD(W, H);
+  renderSpeedDisplay(W, H);
   renderOffScreenIndicator(W, H);
   if (inGameHintAlpha > 0) renderInGameHint(W, H);
   renderLegend(W, H);
@@ -1662,6 +1677,74 @@ function renderFloatingTexts() {
   ctx.globalAlpha  = 1;
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign    = 'left';
+}
+
+// ── SPEED DISPLAY ─────────────────────────────────────────────────────────────
+function renderSpeedDisplay(W, H) {
+  const now    = performance.now() / 1000;
+  const inZone = toSX(player.x) < DANGER_ZONE_WIDTH;
+
+  // Danger zone flicker — brief brightness spike, stops the moment player leaves
+  const flickerPhase = Math.floor(now * 19); // ~19 Hz flicker clock
+  const isFlicker = inZone && (flickerPhase % 7 === 0 || flickerPhase % 13 === 0);
+
+  // Escalation: color and glow shift as speed climbs
+  let col, glowCol, glowAmt;
+  if (_speedKmh >= 700) {
+    col      = '#ffcc99';               // shift toward white-orange
+    glowCol  = '#ff8844';
+    glowAmt  = 14 + Math.sin(now * 7) * 5;
+  } else if (_speedKmh >= 500) {
+    col      = '#ff9966';               // warm orange
+    glowCol  = '#ff5511';
+    glowAmt  = 10 + Math.sin(now * 5) * 3;
+  } else if (_speedKmh >= 300) {
+    col      = '#ff5500';               // classic neon orange-red
+    glowCol  = '#cc2200';
+    glowAmt  = 6 + Math.sin(now * 6) * 3; // pulsing glow
+  } else {
+    col      = '#ff4400';
+    glowCol  = '#cc2200';
+    glowAmt  = 5;
+  }
+
+  // Danger flicker: brightness spike
+  if (isFlicker) { glowAmt *= 2.2; col = '#ffffff'; }
+
+  ctx.save();
+
+  // 700+ km/h: subtle sine-wave vibration
+  if (_speedKmh >= 700) {
+    ctx.translate(
+      Math.sin(now * 29) * 1.2,
+      Math.sin(now * 23) * 0.7
+    );
+  }
+
+  const size = Math.min(W * 0.032, 26);
+  const px   = W + 120;
+  const py   = 40;
+
+  ctx.textAlign    = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.font         = `bold ${size}px monospace`;
+
+  // Subtle dark panel background
+  const text = `${_speedKmh} km/h`;
+  const tw   = ctx.measureText(text).width;
+  const pad  = 6;
+  ctx.fillStyle = 'rgba(0,0,0,0.32)';
+  ctx.fillRect(px - tw - pad, py - size - pad, tw + pad * 2, size + pad * 2);
+
+  // LED digit rendering
+  ctx.shadowColor = glowCol;
+  ctx.shadowBlur  = glowAmt;
+  ctx.fillStyle   = col;
+  ctx.fillText(text, px/2, py);
+  ctx.shadowBlur  = 0;
+
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic';
 }
 
 // ── HUD ───────────────────────────────────────────────────────────────────────
